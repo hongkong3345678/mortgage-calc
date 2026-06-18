@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>房貸能力評估計算機｜台慶 楠梓後昌加宏店</title>
+<meta name="description" content="房貸能力評估計算機 - 台慶不動產 楠梓後昌加宏店" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+</style>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+
+
+
+// ── 色彩系統 ───────────────────────────────────────────
+const C = {
+  navy: "#1B2A4A",
+  navyDeep: "#13203B",
+  gold: "#B7903F",
+  ground: "#EEF0F4",
+  card: "#FFFFFF",
+  ink: "#14213D",
+  muted: "#5B6577",
+  line: "#E2E6EE",
+  pass: "#1F8A4C",
+  passSoft: "#E8F4EC",
+  fail: "#BE123C",
+  failSoft: "#FBEAEE",
+};
+
+const num = (s) => {
+  const n = parseFloat(String(s).replace(/,/g, ""));
+  return isFinite(n) ? n : 0;
+};
+const money = (n) =>
+  "NT$ " + Math.round(n).toLocaleString("en-US");
+const wan = (n) =>
+  (n / 10000).toLocaleString("en-US", { maximumFractionDigits: 1 }) + " 萬";
+
+// 本息均攤月付
+function payment(P, monthlyRate, months) {
+  if (P <= 0 || months <= 0) return 0;
+  if (monthlyRate === 0) return P / months;
+  const f = Math.pow(1 + monthlyRate, months);
+  return (P * monthlyRate * f) / (f - 1);
+}
+// 由月付反推本金
+function principalFromPayment(pay, monthlyRate, months) {
+  if (pay <= 0 || months <= 0) return 0;
+  if (monthlyRate === 0) return pay * months;
+  const f = Math.pow(1 + monthlyRate, months);
+  return (pay * (f - 1)) / (monthlyRate * f);
+}
+
+// ── 負擔分級：依「月收入 ÷ 每月固定支出」的倍數 ──────────
+const GRADES = {
+  A: {
+    label: "寬裕",
+    range: "≥ 1.8 倍",
+    color: "#1F8A4C",
+    soft: "#E8F4EC",
+    advice:
+      "還款能力充裕,屬銀行眼及我眼中的理想型。容易有更好的房貸條件,建議盡快找我看房子。",
+    warn: "如果沒跟我買房子,我可能會難受。",
+  },
+  B: {
+    label: "健全",
+    range: "1.4 ~ 1.8 倍",
+    color: "#1E7FA8",
+    soft: "#E9F2F8",
+    advice:
+      "整體來看還是大拇哥的,聯徵狀況正常下,大多數銀行可順利核貸,倍數越高,貸款條件越漂亮。(如本身沒有薪轉或扣繳憑單,建議進一步詢問專業人員)",
+    warn: "短期內避免再新增其他貸款;利率若上升,月付負擔仍會增加,宜注意。",
+  },
+  C: {
+    label: "略緊",
+    range: "1.3 ~ 1.4 倍",
+    color: "#B7791F",
+    soft: "#FBF1DD",
+    advice:
+      "位於銀行標準的邊緣,能否核貸與成數高低,常取決於職業、年資與信用條件。可考慮拉長年限、自備款或調整降總價來改善。",
+    warn: "可運用的緩衝有限,一旦收入中斷或利率走高,壓力會明顯浮現。",
+  },
+  D: {
+    label: "吃緊",
+    range: "1.2 ~ 1.3 倍",
+    color: "#C0392B",
+    soft: "#FBE9E7",
+    advice:
+      "已逼近銀行實際的下限,通常只有客戶條件優異(職業穩定、年資長、信用良好)時,在某些特定條件之下,部分銀行有機會承作。下決定前,務必請專業人員協助評估。",
+    warn: "幾乎沒有緩衝空間,利率上升或收入波動都可能造成周轉困難,需特別審慎。",
+  },
+  E: {
+    label: "過重",
+    range: "< 1.2 倍",
+    color: "#7A1620",
+    soft: "#F2E2E3",
+    advice:
+      "負擔明顯過重,不建議以目前條件進場。應大幅調降總價、大幅提高自備款、降低每月現金支出,或暫緩購屋計畫。",
+    warn: "永遠都太慢,但永遠都不慢,我們一起調整腳步,只要記得當你要買房子時,我都在!!",
+  },
+};
+function getGrade(ratio) {
+  if (ratio >= 1.8) return { key: "A", ...GRADES.A };
+  if (ratio >= 1.4) return { key: "B", ...GRADES.B };
+  if (ratio >= 1.3) return { key: "C", ...GRADES.C };
+  if (ratio >= 1.2) return { key: "D", ...GRADES.D };
+  return { key: "E", ...GRADES.E };
+}
+
+function Field({ label, unit, value, onChange, placeholder }) {
+  return (
+    <label style={{ display: "block", marginBottom: 14 }}>
+      <span
+        style={{
+          display: "block",
+          fontSize: 13,
+          color: C.muted,
+          marginBottom: 6,
+          fontWeight: 600,
+          letterSpacing: ".02em",
+        }}
+      >
+        {label}
+      </span>
+      <div style={{ position: "relative" }}>
+        <input
+          inputMode="decimal"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value.replace(/[^\d.]/g, ""))}
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            padding: "12px 52px 12px 14px",
+            fontSize: 17,
+            fontWeight: 600,
+            color: C.ink,
+            background: "#FBFCFD",
+            border: `1.5px solid ${C.line}`,
+            borderRadius: 12,
+            outline: "none",
+            fontVariantNumeric: "tabular-nums",
+          }}
+          onFocus={(e) => (e.target.style.borderColor = C.gold)}
+          onBlur={(e) => (e.target.style.borderColor = C.line)}
+        />
+        {unit && (
+          <span
+            style={{
+              position: "absolute",
+              right: 14,
+              top: "50%",
+              transform: "translateY(-50%)",
+              fontSize: 14,
+              color: C.muted,
+              fontWeight: 600,
+              pointerEvents: "none",
+            }}
+          >
+            {unit}
+          </span>
+        )}
+      </div>
+    </label>
+  );
+}
+
+function Card({ title, kicker, children }) {
+  return (
+    <section
+      style={{
+        background: C.card,
+        borderRadius: 18,
+        border: `1px solid ${C.line}`,
+        padding: "20px 18px",
+        marginBottom: 16,
+        boxShadow: "0 1px 3px rgba(20,33,61,.05)",
+      }}
+    >
+      {kicker && (
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: ".14em",
+            color: C.gold,
+            marginBottom: 4,
+          }}
+        >
+          {kicker}
+        </div>
+      )}
+      {title && (
+        <h2
+          style={{
+            margin: "0 0 16px",
+            fontSize: 18,
+            fontWeight: 800,
+            color: C.ink,
+          }}
+        >
+          {title}
+        </h2>
+      )}
+      {children}
+    </section>
+  );
+}
+
+function App() {
+  const [totalWan, setTotalWan] = useState("1000");
+  const [ltv, setLtv] = useState("80");
+  const [rate, setRate] = useState("2.6");
+  const [years, setYears] = useState("30");
+  const [grace, setGrace] = useState("0");
+  const [debt, setDebt] = useState("0");
+  const [living, setLiving] = useState("17000");
+  const [income, setIncome] = useState("60000");
+  const [mult, setMult] = useState("1.4");
+  const [hintOpen, setHintOpen] = useState(false);
+
+  // 計算
+  const ltvPct = num(ltv) / 100;
+  const loanWanCalc = num(totalWan) * ltvPct; // 貸款金額(萬)
+  const P = loanWanCalc * 10000;
+  const mr = num(rate) / 100 / 12;
+  const totalMonths = num(years) * 12;
+  const graceMonths = Math.min(num(grace) * 12, totalMonths);
+  const amortMonths = totalMonths - graceMonths;
+
+  const monthly = payment(P, mr, amortMonths); // 寬限期後 / 一般月付
+  const graceMonthly = P * mr; // 寬限期內僅付息
+
+  const fixed = monthly + num(debt) + num(living);
+  const M = num(mult) || 1;
+  const required = fixed * M; // 建議最低月收
+  const inc = num(income);
+  const gap = inc - required; // >0 餘裕 / <0 缺口
+  const ratio = fixed > 0 ? inc / fixed : 0;
+
+  // 反推：此收入可負擔的最高房貸月付 & 貸款金額
+  const maxPay = Math.max(0, inc / M - num(debt) - num(living));
+  const maxPrincipal = principalFromPayment(maxPay, mr, amortMonths);
+  const maxTotal = ltvPct > 0 ? maxPrincipal / ltvPct : 0; // 對應房屋總價
+
+  // 分級 + 比例條指針(對應 1.0 ~ 2.5 倍的視覺範圍)
+  const g = getGrade(ratio);
+  const pointerPct = Math.max(0, Math.min(100, ((ratio - 1.0) / 1.2) * 100));
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: C.ground,
+        fontFamily:
+          '"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif',
+        color: C.ink,
+        WebkitFontSmoothing: "antialiased",
+      }}
+    >
+      <div style={{ maxWidth: 460, margin: "0 auto", padding: "0 0 40px" }}>
+        {/* Header */}
+        <header
+          style={{
+            background: `linear-gradient(160deg, ${C.navy}, ${C.navyDeep})`,
+            padding: "26px 20px 22px",
+            color: "#fff",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              letterSpacing: ".18em",
+              color: C.gold,
+              fontWeight: 700,
+              marginBottom: 6,
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span>台慶 · 楠梓後昌加宏店</span>
+            <span style={{ color: "rgba(255,255,255,.55)" }}>07-3650999</span>
+          </div>
+          <h1 style={{ margin: 0, fontSize: 25, fontWeight: 800 }}>
+            房貸能力評估計算機
+          </h1>
+          <p
+            style={{
+              margin: "8px 0 0",
+              fontSize: 13,
+              color: "rgba(255,255,255,.7)",
+              lineHeight: 1.5,
+            }}
+          >
+            此算法為現階段大部分銀行可容許的計算方式。
+          </p>
+          <p
+            style={{
+              margin: "6px 0 0",
+              fontSize: 11.5,
+              color: "rgba(255,255,255,.5)",
+              lineHeight: 1.6,
+            }}
+          >
+            試算結果僅供初步參考,各家銀行的評估標準、核貸成數、利率與額度不一,實際以銀行審核結果為準,不構成貸款承諾或任何財務建議。
+          </p>
+          <div
+            style={{
+              marginTop: 14,
+              paddingTop: 12,
+              borderTop: "1px solid rgba(255,255,255,.12)",
+              fontSize: 12.5,
+              color: C.gold,
+              fontWeight: 600,
+              letterSpacing: ".18em",
+              lineHeight: 1.8,
+              textAlign: "center",
+            }}
+          >
+            <div>以人為本,以誠為根</div>
+            <div>首選聚星地產團隊</div>
+          </div>
+        </header>
+
+        <div style={{ padding: "18px 16px 0" }}>
+          {/* 房貸條件 */}
+          <Card kicker="STEP 1" title="房貸條件">
+            <Field
+              label="購買房屋總價"
+              unit="萬"
+              value={totalWan}
+              onChange={setTotalWan}
+              placeholder="1000"
+            />
+
+            {/* 貸款成數調整桿 */}
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                }}
+              >
+                <span
+                  style={{ fontSize: 13, color: C.muted, fontWeight: 600 }}
+                >
+                  貸款成數
+                </span>
+                <span
+                  style={{
+                    fontSize: 24,
+                    fontWeight: 800,
+                    color: C.gold,
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {num(ltv)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="40"
+                max="90"
+                step="1"
+                value={num(ltv)}
+                onChange={(e) => setLtv(e.target.value)}
+                style={{
+                  width: "100%",
+                  margin: "2px 0",
+                  accentColor: C.gold,
+                  cursor: "pointer",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11.5,
+                  color: C.muted,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                <span>40%</span>
+                <span>一般 70 ~ 80%</span>
+                <span>90%</span>
+              </div>
+            </div>
+
+            {/* 由總價 × 成數推算的貸款金額 */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "11px 14px",
+                background: "#FBFCFD",
+                border: `1px solid ${C.line}`,
+                borderRadius: 12,
+                marginBottom: 14,
+              }}
+            >
+              <span style={{ fontSize: 13, color: C.muted, fontWeight: 600 }}>
+                貸款金額（總價 × 成數)
+              </span>
+              <span
+                style={{
+                  fontSize: 17,
+                  fontWeight: 800,
+                  color: C.ink,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {loanWanCalc > 0
+                  ? loanWanCalc.toLocaleString("en-US", {
+                      maximumFractionDigits: 1,
+                    }) + " 萬"
+                  : "—"}
+              </span>
+            </div>
+
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <Field
+                  label="年利率"
+                  unit="%"
+                  value={rate}
+                  onChange={setRate}
+                  placeholder="2.6"
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <Field
+                  label="貸款年限"
+                  unit="年"
+                  value={years}
+                  onChange={setYears}
+                  placeholder="30"
+                />
+              </div>
+            </div>
+            <Field
+              label="寬限期（只付利息,非必填）"
+              unit="年"
+              value={grace}
+              onChange={setGrace}
+              placeholder="0"
+            />
+
+            <div
+              style={{
+                marginTop: 6,
+                padding: "14px 16px",
+                background: C.navy,
+                borderRadius: 14,
+                color: "#fff",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <span style={{ fontSize: 13, color: "rgba(255,255,255,.75)" }}>
+                預估房貸月付
+              </span>
+              <span
+                style={{
+                  fontSize: 22,
+                  fontWeight: 800,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {money(monthly)}
+              </span>
+            </div>
+            {graceMonths > 0 && (
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 12.5,
+                  color: C.muted,
+                  lineHeight: 1.5,
+                }}
+              >
+                寬限期內每月僅付息約 <b>{money(graceMonthly)}</b>;上方以
+                寬限期後的月付來評估負擔(較保守)。
+              </div>
+            )}
+          </Card>
+
+          {/* 收支條件 */}
+          <Card kicker="STEP 2" title="收支條件">
+            <Field
+              label="每月其他負債（車貸、信貸、卡費…）"
+              unit="元"
+              value={debt}
+              onChange={setDebt}
+              placeholder="0"
+            />
+            <Field
+              label="每月生活費"
+              unit="元"
+              value={living}
+              onChange={setLiving}
+              placeholder="17000"
+            />
+            <div style={{ margin: "-6px 0 14px" }}>
+              <button
+                onClick={() => setHintOpen((v) => !v)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: 0,
+                  border: "none",
+                  background: "none",
+                  color: C.gold,
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 16,
+                    height: 16,
+                    borderRadius: "50%",
+                    border: `1.5px solid ${C.gold}`,
+                    fontSize: 11,
+                  }}
+                >
+                  ?
+                </span>
+                為什麼是 17,000?
+                <span
+                  style={{
+                    transform: hintOpen ? "rotate(180deg)" : "none",
+                    transition: "transform .2s",
+                    fontSize: 10,
+                  }}
+                >
+                  ▾
+                </span>
+              </button>
+              {hintOpen && (
+                <p
+                  style={{
+                    margin: "8px 0 0",
+                    padding: "10px 12px",
+                    background: "#FBFCFD",
+                    border: `1px solid ${C.line}`,
+                    borderRadius: 10,
+                    fontSize: 12.5,
+                    color: C.muted,
+                    lineHeight: 1.65,
+                  }}
+                >
+                  17,000 為銀行低標（全戶常僅計一人)。自評還款現金流時建議
+                  往上加,以控風險。
+                </p>
+              )}
+            </div>
+            <Field
+              label="個人月收入"
+              unit="元"
+              value={income}
+              onChange={setIncome}
+              placeholder="60000"
+            />
+            <div style={{ paddingTop: 6 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  marginBottom: 12,
+                }}
+              >
+                <span
+                  style={{ fontSize: 13, color: C.muted, fontWeight: 600 }}
+                >
+                  安全倍數
+                </span>
+                <span
+                  style={{
+                    fontSize: 24,
+                    fontWeight: 800,
+                    color: C.gold,
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  ×{M.toFixed(1)}
+                </span>
+              </div>
+
+              {/* 建議區間標示帶 (1.4~1.5 落在 1.3~2.0 的相對位置) */}
+              <div
+                style={{
+                  position: "relative",
+                  height: 6,
+                  borderRadius: 4,
+                  background: C.line,
+                  marginBottom: 2,
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${((1.4 - 1.3) / (2.0 - 1.3)) * 100}%`,
+                    width: `${((1.5 - 1.4) / (2.0 - 1.3)) * 100}%`,
+                    top: 0,
+                    bottom: 0,
+                    background: C.pass,
+                    borderRadius: 4,
+                  }}
+                />
+              </div>
+
+              <input
+                type="range"
+                min="1.3"
+                max="2.0"
+                step="0.1"
+                value={M}
+                onChange={(e) => setMult(e.target.value)}
+                style={{
+                  width: "100%",
+                  margin: "4px 0 2px",
+                  accentColor: C.gold,
+                  cursor: "pointer",
+                }}
+              />
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11.5,
+                  color: C.muted,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                <span>1.3</span>
+                <span style={{ color: C.pass, fontWeight: 700 }}>
+                  建議 1.4 ~ 1.5
+                </span>
+                <span>2.0</span>
+              </div>
+
+              <p
+                style={{
+                  margin: "12px 0 0",
+                  fontSize: 12,
+                  color: C.muted,
+                  lineHeight: 1.6,
+                }}
+              >
+                建議先以 <b style={{ color: C.ink }}>1.4 倍</b> 估算。客戶條件
+                越好,倍數可越寬鬆——若工作穩定、屬銀行偏好族群(薪資穩定、
+                年資足夠、上市櫃或公教等),部分銀行可接受{" "}
+                <b style={{ color: C.ink }}>1.3 倍</b> 甚至更低;反之條件較弱,
+                銀行會要求更高的倍數(常見 1.8 倍以上)以控管風險。
+              </p>
+            </div>
+          </Card>
+
+          {/* 評估結果 — 分級 */}
+          <section
+            style={{
+              borderRadius: 20,
+              padding: "22px 20px",
+              background: g.soft,
+              border: `1.5px solid ${g.color}`,
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: ".14em",
+                color: g.color,
+                marginBottom: 14,
+              }}
+            >
+              評估結果
+            </div>
+
+            {/* 等級徽章 */}
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <div
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 16,
+                  background: g.color,
+                  color: "#fff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 38,
+                  fontWeight: 800,
+                  flexShrink: 0,
+                  lineHeight: 1,
+                }}
+              >
+                {g.key}
+              </div>
+              <div>
+                <div
+                  style={{ fontSize: 24, fontWeight: 800, color: g.color }}
+                >
+                  {g.label}
+                </div>
+                <div
+                  style={{ fontSize: 13, color: C.ink, lineHeight: 1.55 }}
+                >
+                  收入為固定支出的{" "}
+                  <b style={{ color: g.color }}>{ratio.toFixed(2)} 倍</b>
+                  {gap >= 0 ? (
+                    <>;高於你設定的 ×{M} 門檻,餘裕 {money(gap)}。</>
+                  ) : (
+                    <>;低於你設定的 ×{M} 門檻,尚差 {money(-gap)}。</>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 分級比例條 */}
+            <div style={{ marginTop: 20 }}>
+              <div
+                style={{
+                  position: "relative",
+                  height: 12,
+                  borderRadius: 6,
+                  overflow: "hidden",
+                  display: "flex",
+                }}
+              >
+                <div style={{ width: "16.67%", background: GRADES.E.color }} />
+                <div style={{ width: "8.33%", background: GRADES.D.color }} />
+                <div style={{ width: "8.33%", background: GRADES.C.color }} />
+                <div style={{ width: "33.33%", background: GRADES.B.color }} />
+                <div style={{ width: "33.34%", background: GRADES.A.color }} />
+              </div>
+              <div style={{ position: "relative", height: 16 }}>
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${pointerPct}%`,
+                    transform: "translateX(-50%)",
+                    top: 1,
+                    fontSize: 13,
+                    color: C.ink,
+                    lineHeight: 1,
+                  }}
+                >
+                  ▲
+                </div>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "5px 12px",
+                  fontSize: 11,
+                  color: C.muted,
+                }}
+              >
+                {["A", "B", "C", "D", "E"].map((k) => (
+                  <span
+                    key={k}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      fontWeight: g.key === k ? 800 : 500,
+                      color: g.key === k ? GRADES[k].color : C.muted,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: 2,
+                        background: GRADES[k].color,
+                        display: "inline-block",
+                      }}
+                    />
+                    {k} {GRADES[k].range}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* 建議 */}
+            <div
+              style={{
+                marginTop: 20,
+                background: "#fff",
+                borderRadius: 12,
+                padding: "14px 16px",
+                borderLeft: `4px solid ${g.color}`,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: g.color,
+                  marginBottom: 6,
+                  letterSpacing: ".1em",
+                }}
+              >
+                建議
+              </div>
+              <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.75 }}>
+                {g.advice}
+              </div>
+            </div>
+
+            {/* 警語 */}
+            <div
+              style={{
+                marginTop: 10,
+                background: "#fff",
+                borderRadius: 12,
+                padding: "14px 16px",
+                borderLeft: `4px solid ${C.muted}`,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: C.muted,
+                  marginBottom: 6,
+                  letterSpacing: ".1em",
+                }}
+              >
+                ⚠ 警語
+              </div>
+              <div
+                style={{ fontSize: 13.5, color: C.muted, lineHeight: 1.75 }}
+              >
+                {g.warn}
+              </div>
+            </div>
+
+            {/* 明細 */}
+            <div
+              style={{
+                marginTop: 16,
+                background: "#fff",
+                borderRadius: 12,
+                padding: "4px 14px",
+              }}
+            >
+              {[
+                ["房貸月付", money(monthly)],
+                ["其他負債", money(num(debt))],
+                ["生活費", money(num(living))],
+              ].map(([k, v], i) => (
+                <Row key={i} k={k} v={v} />
+              ))}
+              <Row k="每月固定支出" v={money(fixed)} bold />
+              <Row
+                k={`建議最低月收（×${M}）`}
+                v={money(required)}
+                accent
+                bold
+              />
+              <Row k="實際月收入" v={money(inc)} />
+            </div>
+          </section>
+
+          {/* 反推 */}
+          <Card kicker="參考" title="以這份收入,最多能買多少?">
+            <div
+              style={{
+                background: C.navy,
+                borderRadius: 14,
+                padding: "16px 18px",
+                marginBottom: 12,
+                color: "#fff",
+                textAlign: "center",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12.5,
+                  color: "rgba(255,255,255,.7)",
+                  marginBottom: 4,
+                }}
+              >
+                可負擔房屋總價（以成數 {num(ltv)}% 計)
+              </div>
+              <div
+                style={{
+                  fontSize: 28,
+                  fontWeight: 800,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {maxTotal > 0 ? wan(maxTotal) : "—"}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <Stat label="可負擔最高月付" value={money(maxPay)} />
+              <Stat
+                label="對應貸款金額"
+                value={maxPrincipal > 0 ? wan(maxPrincipal) : "—"}
+              />
+            </div>
+            <p
+              style={{
+                margin: "14px 0 0",
+                fontSize: 12,
+                color: C.muted,
+                lineHeight: 1.6,
+              }}
+            >
+              依目前的利率 {num(rate)}%、年限 {num(years)} 年、成數 {num(ltv)}
+              %、安全倍數 ×{M},在不超出負擔的前提下反推得出,供客戶評估找屋
+              價位參考。
+            </p>
+          </Card>
+
+          <p
+            style={{
+              fontSize: 11.5,
+              color: C.muted,
+              textAlign: "center",
+              lineHeight: 1.6,
+              margin: "4px 12px 0",
+            }}
+          >
+            本工具為內部評估參考,實際核貸條件、成數與利率以銀行審核為準。
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Row({ k, v, bold, accent }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "9px 0",
+        borderBottom: `1px solid ${C.line}`,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 13.5,
+          color: accent ? C.gold : C.muted,
+          fontWeight: bold ? 700 : 500,
+        }}
+      >
+        {k}
+      </span>
+      <span
+        style={{
+          fontSize: bold ? 16 : 14.5,
+          fontWeight: bold ? 800 : 600,
+          color: accent ? C.gold : C.ink,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {v}
+      </span>
+    </div>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        background: "#FBFCFD",
+        border: `1px solid ${C.line}`,
+        borderRadius: 14,
+        padding: "14px 12px",
+        textAlign: "center",
+      }}
+    >
+      <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 800,
+          color: C.navy,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
